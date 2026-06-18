@@ -67,7 +67,6 @@ class EmailCheckRequest(BaseModel):
 
 
 class LoginRequest(EmailCheckRequest):
-    password: str
     googleToken: str | None = None
 
 
@@ -78,10 +77,6 @@ class PhoneCheckRequest(BaseModel):
 
 class OtpVerifyRequest(PhoneCheckRequest):
     otp: str
-
-
-class PhoneLoginRequest(PhoneCheckRequest):
-    password: str
 
 
 def env_column(name: str, default: str) -> str:
@@ -352,28 +347,6 @@ def verify_stored_otp(phone: str, role: str, otp: str) -> None:
         conn.commit()
 
 
-def assert_recent_phone_otp_verified(phone: str, role: str) -> None:
-    verified_after = datetime.utcnow() - timedelta(minutes=OTP_EXPIRY_MINUTES)
-
-    with db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT otp_id
-                FROM public.sss_login_otp_tokens
-                WHERE role = %s
-                  AND phone = %s
-                  AND verified_at IS NOT NULL
-                  AND verified_at >= %s
-                ORDER BY verified_at DESC
-                LIMIT 1
-                """,
-                (role, phone, verified_after),
-            )
-            if not cur.fetchone():
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please verify OTP first.")
-
-
 def verify_google_token(google_token: str, email: str) -> None:
     if not GOOGLE_CLIENT_ID:
         return
@@ -463,10 +436,6 @@ def login(payload: LoginRequest):
 
     assert_role_matches(user, payload.role)
 
-    password_column = get_role_config(payload.role)["password"]
-    if not verify_password(payload.password, user.get(password_column)):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password.")
-
     if GOOGLE_CLIENT_ID and not payload.googleToken:
         return {"authenticated": False, "requiresGoogleAuth": True}
 
@@ -480,26 +449,3 @@ def login(payload: LoginRequest):
         "user": public_user(user, payload.role),
     }
 
-
-@app.post("/api/auth/login-phone")
-def login_phone(payload: PhoneLoginRequest):
-    phone = normalize_phone(payload.phone)
-    assert_recent_phone_otp_verified(phone, payload.role)
-
-    user = fetch_user_by_phone(phone, payload.role)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=AUTH_NOT_AUTHORISED_MESSAGE)
-
-    assert_role_matches(user, payload.role)
-
-    password_column = get_role_config(payload.role)["password"]
-    if not verify_password(payload.password, user.get(password_column)):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password.")
-
-    return {
-        "authenticated": True,
-        "email": user_email(user, payload.role),
-        "phone": phone,
-        "role": payload.role,
-        "user": public_user(user, payload.role),
-    }
