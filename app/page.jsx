@@ -54,11 +54,28 @@ function SchoolLogo() {
   return (
     <img
       className="school-logo"
-      src={useFallback ? "/assets/sgs-school-logo.svg" : "/assets/sgs-school-logo.jpeg"}
-      alt="SGS Senior Secondary School logo"
+      src={useFallback ? "/assets/sss-logo.jpeg" : "/assets/sss-logo.jpeg"}
+      alt="SSS logo"
       onError={() => setUseFallback(true)}
     />
   );
+}
+
+function encodeGoogleState(data) {
+  return btoa(JSON.stringify(data))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function decodeGoogleState(state) {
+  try {
+    const base64 = state.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
 }
 
 export default function Home() {
@@ -71,14 +88,17 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [isEmailVerified, setIsEmailVerified] = useState(false);
   const [phoneStep, setPhoneStep] = useState("phone");
-  const [pendingGoogleLogin, setPendingGoogleLogin] = useState(null);
+  const [googleToken, setGoogleToken] = useState("");
+  const [isGoogleVerified, setIsGoogleVerified] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
   const roleDropdownRef = useRef(null);
-  const googleButtonRef = useRef(null);
+  const pendingGoogleLoginRef = useRef(null);
+  const isRestoringGoogleLoginRef = useRef(false);
   const roles = ["Student", "Faculty", "Headmaster", "Parent", "Admin"];
   const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/$/, "");
   const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
+  const googleRedirectUri = process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI || "";
 
   useEffect(() => {
     function handleOutsideClick(event) {
@@ -92,60 +112,89 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (isRestoringGoogleLoginRef.current) {
+      isRestoringGoogleLoginRef.current = false;
+      return;
+    }
+
+    if (isGoogleVerified) {
+      return;
+    }
+
+    const verifiedLogin = JSON.parse(sessionStorage.getItem("sssVerifiedGoogleLogin") || "null");
+    if (verifiedLogin?.email === email && verifiedLogin?.role === selectedRole && verifiedLogin?.googleToken) {
+      return;
+    }
+
+    sessionStorage.removeItem("sssVerifiedGoogleLogin");
     setIsEmailVerified(false);
-    setPendingGoogleLogin(null);
+    pendingGoogleLoginRef.current = null;
+    setGoogleToken("");
+    setIsGoogleVerified(false);
     setPassword("");
     setMessage("");
-  }, [email, selectedRole]);
+  }, [email, selectedRole, isGoogleVerified]);
 
   useEffect(() => {
     setPhoneStep("phone");
     setOtp("");
     setPassword("");
+    setGoogleToken("");
+    setIsGoogleVerified(false);
+    pendingGoogleLoginRef.current = null;
     setMessage("");
-  }, [phone, selectedRole]);
+  }, [phone]);
 
   useEffect(() => {
-    if (!pendingGoogleLogin || !googleClientId || !googleButtonRef.current) {
+    const verifiedLogin = JSON.parse(sessionStorage.getItem("sssVerifiedGoogleLogin") || "null");
+    if (verifiedLogin?.email && verifiedLogin?.role && verifiedLogin?.googleToken) {
+      isRestoringGoogleLoginRef.current = true;
+      setEmail(verifiedLogin.email);
+      setSelectedRole(verifiedLogin.role);
+      setIsEmailVerified(true);
+      setGoogleToken(verifiedLogin.googleToken);
+      setIsGoogleVerified(true);
+      setMessage("Google verified. Please enter your password.");
+      setIsLoading(false);
       return;
     }
 
-    let isCancelled = false;
+    if (!window.location.hash.includes("id_token")) {
+      return;
+    }
 
-    loadGoogleScript()
-      .then(() => {
-        if (isCancelled || !googleButtonRef.current) {
-          return;
-        }
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const token = params.get("id_token");
+    const state = params.get("state");
+    const pendingLogin = JSON.parse(sessionStorage.getItem("sssPendingGoogleLogin") || "null");
+    const stateLogin = state ? decodeGoogleState(state) : null;
+    const loginContext = pendingLogin?.state === state ? pendingLogin : stateLogin;
 
-        googleButtonRef.current.innerHTML = "";
-        window.google.accounts.id.initialize({
-          client_id: googleClientId,
-          auto_select: false,
-          cancel_on_tap_outside: false,
-          callback: (response) => {
-            if (response?.credential) {
-              completeGoogleLogin(response.credential);
-              return;
-            }
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
 
-            setMessage("Google authentication failed.");
-          }
-        });
-        window.google.accounts.id.renderButton(googleButtonRef.current, {
-          theme: "outline",
-          size: "large",
-          width: 320,
-          text: "signin_with",
-          shape: "rectangular"
-        });
-      })
-      .catch(() => setMessage("Google sign-in could not load. Please check your browser or network."));
+    if (!token || !loginContext?.email || !loginContext?.role) {
+      sessionStorage.removeItem("sssPendingGoogleLogin");
+      setIsLoading(false);
+      setMessage("Google authentication failed. Please try again.");
+      return;
+    }
 
-    return () => {
-      isCancelled = true;
-    };
-  }, [pendingGoogleLogin, googleClientId]);
+    sessionStorage.removeItem("sssPendingGoogleLogin");
+    sessionStorage.setItem("sssVerifiedGoogleLogin", JSON.stringify({
+      email: loginContext.email,
+      role: loginContext.role,
+      googleToken: token
+    }));
+    isRestoringGoogleLoginRef.current = true;
+    setEmail(loginContext.email);
+    setSelectedRole(loginContext.role);
+    setIsEmailVerified(true);
+    setGoogleToken(token);
+    setIsGoogleVerified(true);
+    pendingGoogleLoginRef.current = null;
+    setMessage("Google verified. Please enter your password.");
+    setIsLoading(false);
+  }, []);
 
   function dashboardPath(role) {
     const paths = {
@@ -173,14 +222,10 @@ export default function Home() {
         return "Verify OTP";
       }
 
-      if (phoneStep === "password") {
-        return "Sign In";
-      }
-
       return "Send OTP";
     }
 
-    return isEmailVerified ? "Sign In" : "Continue";
+    return isEmailVerified && (!googleClientId || isGoogleVerified) ? "Sign In" : "Continue";
   }
 
   async function postJson(path, body) {
@@ -201,50 +246,37 @@ export default function Home() {
     return data;
   }
 
-  function loadGoogleScript() {
-    if (window.google?.accounts?.id) {
-      return Promise.resolve();
-    }
-
-    return new Promise((resolve, reject) => {
-      const existingScript = document.querySelector("script[data-google-identity]");
-      if (existingScript) {
-        existingScript.addEventListener("load", resolve, { once: true });
-        existingScript.addEventListener("error", reject, { once: true });
-        return;
-      }
-
-      const script = document.createElement("script");
-      script.src = "https://accounts.google.com/gsi/client";
-      script.async = true;
-      script.defer = true;
-      script.dataset.googleIdentity = "true";
-      script.onload = resolve;
-      script.onerror = reject;
-      document.head.appendChild(script);
-    });
-  }
-
-  async function completeGoogleLogin(googleToken) {
-    if (!pendingGoogleLogin) {
+  async function startGoogleVerification(loginContext) {
+    if (!googleClientId) {
+      setMessage("Google Client ID is not configured.");
+      setIsLoading(false);
       return;
     }
 
-    setIsLoading(true);
-    setMessage("");
+    const state = encodeGoogleState({
+      email: loginContext.email,
+      role: loginContext.role,
+      nonce: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`
+    });
+    const nonce = crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    const redirectUri = googleRedirectUri || `${window.location.origin}${window.location.pathname}`;
+    const nextLoginContext = { ...loginContext, state };
 
-    try {
-      const verifiedResponse = await postJson("/api/auth/login", {
-        ...pendingGoogleLogin,
-        googleToken
-      });
+    sessionStorage.removeItem("sssVerifiedGoogleLogin");
+    sessionStorage.setItem("sssPendingGoogleLogin", JSON.stringify(nextLoginContext));
+    pendingGoogleLoginRef.current = nextLoginContext;
 
-      completeLogin(verifiedResponse);
-    } catch (error) {
-      setMessage(error.message || "Google authentication failed.");
-    } finally {
-      setIsLoading(false);
-    }
+    const params = new URLSearchParams({
+      client_id: googleClientId,
+      redirect_uri: redirectUri,
+      response_type: "id_token",
+      scope: "openid email profile",
+      nonce,
+      state,
+      prompt: "select_account"
+    });
+
+    window.location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
   }
 
   function completeLogin(data) {
@@ -255,8 +287,8 @@ export default function Home() {
       user: data.user
     };
 
-    sessionStorage.setItem("sgsUserSession", JSON.stringify(session));
-    localStorage.setItem("sgsUserSession", JSON.stringify(session));
+    sessionStorage.setItem("sssUserSession", JSON.stringify(session));
+    localStorage.setItem("sssUserSession", JSON.stringify(session));
     window.location.assign(dashboardPath(data.role));
   }
 
@@ -296,28 +328,14 @@ export default function Home() {
             return;
           }
 
-          await postJson("/api/auth/verify-otp", {
+          const loginResponse = await postJson("/api/auth/verify-otp", {
             phone: normalizedPhone,
             role: selectedRole,
             otp: otp.trim()
           });
-          setPhoneStep("password");
-          setMessage("");
+          completeLogin(loginResponse);
           return;
         }
-
-        if (!password) {
-          setMessage("Please enter your password.");
-          return;
-        }
-
-        const loginResponse = await postJson("/api/auth/login-phone", {
-          phone: normalizedPhone,
-          role: selectedRole,
-          password
-        });
-        completeLogin(loginResponse);
-        return;
       }
 
       if (!email.trim()) {
@@ -331,7 +349,23 @@ export default function Home() {
           role: selectedRole
         });
         setIsEmailVerified(true);
+        if (googleClientId) {
+          await startGoogleVerification({
+            email: email.trim(),
+            role: selectedRole
+          });
+          return;
+        }
+
         setMessage("");
+        return;
+      }
+
+      if (googleClientId && !isGoogleVerified) {
+        await startGoogleVerification({
+          email: email.trim(),
+          role: selectedRole
+        });
         return;
       }
 
@@ -340,10 +374,11 @@ export default function Home() {
         return;
       }
 
-      const loginResponse = await postJson("/api/auth/login", {
+    const loginResponse = await postJson("/api/auth/login", {
         email: email.trim(),
         role: selectedRole,
-        password
+        password,
+        googleToken
       });
 
       if (loginResponse.requiresGoogleAuth) {
@@ -352,12 +387,10 @@ export default function Home() {
           return;
         }
 
-        setPendingGoogleLogin({
+        await startGoogleVerification({
           email: email.trim(),
-          role: selectedRole,
-          password
+          role: selectedRole
         });
-        setMessage("Please continue with Google using the button below.");
         return;
       }
 
@@ -366,6 +399,7 @@ export default function Home() {
         return;
       }
 
+      sessionStorage.removeItem("sssVerifiedGoogleLogin");
       completeLogin(loginResponse);
     } catch (error) {
       setMessage(error.message || "Something went wrong. Please try again.");
@@ -376,20 +410,16 @@ export default function Home() {
 
   return (
     <main className="login-page">
-      <section className="brand-panel" aria-label="SGS Portal">
+      <section className="brand-panel" aria-label="SSS Portal">
         <div className="sky-shape top-shape" />
         <div className="dot-grid" aria-hidden="true" />
 
         <div className="brand-content">
           <SchoolLogo />
-          <h1>SGS PORTAL</h1>
+          <h1>SSS PORTAL</h1>
           <div className="gold-divider" aria-hidden="true" />
           <p className="tagline">Smart. Global. Secure.</p>
 
-          <div className="portal-copy">
-            <h2>SGS Learning Portal</h2>
-            <p>One platform for students, teachers, parents and administrators to connect, learn and grow together.</p>
-          </div>
         </div>
 
         <img className="campus-art" src="/assets/campus-hero.png" alt="Students walking toward a bright school campus" />
@@ -515,7 +545,7 @@ export default function Home() {
               </label>
             ) : null}
 
-            {(method === "email" && isEmailVerified) || (method === "phone" && phoneStep === "password") ? (
+            {method === "email" && isEmailVerified && (!googleClientId || isGoogleVerified) ? (
               <label className="field-group">
                 <span>Password</span>
                 <span className="input-wrap">
@@ -532,12 +562,6 @@ export default function Home() {
             ) : null}
 
             {message ? <p className="form-message" role="alert">{message}</p> : null}
-
-            {pendingGoogleLogin ? (
-              <div className="google-auth-panel">
-                <div ref={googleButtonRef} />
-              </div>
-            ) : null}
 
             <div className="form-links-row">
               <label className="remember">
@@ -564,7 +588,7 @@ export default function Home() {
         </form>
 
         <footer className="footer">
-          <span>&copy; 2024 SGS Portal. All rights reserved.</span>
+          <span>&copy; 2024 SSS Portal. All rights reserved.</span>
           <span className="footer-link">Privacy Policy</span>
           <span className="footer-link">Terms of Use</span>
         </footer>

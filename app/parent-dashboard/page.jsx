@@ -1,7 +1,7 @@
 import DashboardShell from "../DashboardShell";
 
 export const metadata = {
-  title: "Parent Dashboard | SGS Portal"
+  title: "Parent Dashboard | SSS Portal"
 };
 
 export default function ParentDashboard() {

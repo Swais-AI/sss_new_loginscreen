@@ -1,6 +1,7 @@
 import os
 import hashlib
 import hmac
+import logging
 import random
 import re
 from contextlib import contextmanager
@@ -41,11 +42,14 @@ TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER", "").strip()
 OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "5"))
+OTP_DELIVERY_MODE = os.getenv("OTP_DELIVERY_MODE", "sms").strip().lower()
 OTP_MAX_ATTEMPTS = 5
+
+logger = logging.getLogger("uvicorn.error")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-app = FastAPI(title="SGS Portal Auth API")
+app = FastAPI(title="SSS Portal Auth API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -88,37 +92,37 @@ def env_column(name: str, default: str) -> str:
 
 ROLE_TABLES = {
     "Student": {
-        "table": "sgs_student_master",
-        "email": env_column("SGS_STUDENT_EMAIL_COLUMN", "email"),
-        "phone": env_column("SGS_STUDENT_PHONE_COLUMN", "phone"),
-        "password": env_column("SGS_STUDENT_PASSWORD_COLUMN", "password"),
+        "table": "sss_student_master",
+        "email": env_column("SSS_STUDENT_EMAIL_COLUMN", "email"),
+        "phone": env_column("SSS_STUDENT_PHONE_COLUMN", "phone"),
+        "password": env_column("SSS_STUDENT_PASSWORD_COLUMN", "password"),
     },
     "Faculty": {
-        "table": "sgs_teacher_master",
-        "email": env_column("SGS_TEACHER_EMAIL_COLUMN", "email"),
-        "phone": env_column("SGS_TEACHER_PHONE_COLUMN", "phone"),
-        "password": env_column("SGS_TEACHER_PASSWORD_COLUMN", "password"),
-        "role": env_column("SGS_TEACHER_ROLE_COLUMN", "role"),
+        "table": "sss_teacher_master",
+        "email": env_column("SSS_TEACHER_EMAIL_COLUMN", "email"),
+        "phone": env_column("SSS_TEACHER_PHONE_COLUMN", "phone"),
+        "password": env_column("SSS_TEACHER_PASSWORD_COLUMN", "password"),
+        "role": env_column("SSS_TEACHER_ROLE_COLUMN", "role"),
     },
     "Headmaster": {
-        "table": "sgs_teacher_master",
-        "email": env_column("SGS_TEACHER_EMAIL_COLUMN", "email"),
-        "phone": env_column("SGS_TEACHER_PHONE_COLUMN", "phone"),
-        "password": env_column("SGS_TEACHER_PASSWORD_COLUMN", "password"),
-        "role": env_column("SGS_TEACHER_ROLE_COLUMN", "role"),
+        "table": "sss_teacher_master",
+        "email": env_column("SSS_TEACHER_EMAIL_COLUMN", "email"),
+        "phone": env_column("SSS_TEACHER_PHONE_COLUMN", "phone"),
+        "password": env_column("SSS_TEACHER_PASSWORD_COLUMN", "password"),
+        "role": env_column("SSS_TEACHER_ROLE_COLUMN", "role"),
         "required_role": "Headmaster",
     },
     "Parent": {
-        "table": "sgs_parent_master",
-        "email": env_column("SGS_PARENT_EMAIL_COLUMN", "email"),
-        "phone": env_column("SGS_PARENT_PHONE_COLUMN", "phone"),
-        "password": env_column("SGS_PARENT_PASSWORD_COLUMN", "password"),
+        "table": "sss_parent_master",
+        "email": env_column("SSS_PARENT_EMAIL_COLUMN", "email"),
+        "phone": env_column("SSS_PARENT_PHONE_COLUMN", "phone"),
+        "password": env_column("SSS_PARENT_PASSWORD_COLUMN", "password"),
     },
     "Admin": {
-        "table": "sgs_student_master",
-        "email": env_column("SGS_ADMIN_EMAIL_COLUMN", "admin_email"),
-        "phone": env_column("SGS_ADMIN_PHONE_COLUMN", "admin_phone"),
-        "password": env_column("SGS_ADMIN_PASSWORD_COLUMN", "admin_password"),
+        "table": "sss_student_master",
+        "email": env_column("SSS_ADMIN_EMAIL_COLUMN", "admin_email"),
+        "phone": env_column("SSS_ADMIN_PHONE_COLUMN", "admin_phone"),
+        "password": env_column("SSS_ADMIN_PASSWORD_COLUMN", "admin_password"),
     },
 }
 
@@ -244,7 +248,7 @@ def create_otp() -> str:
 
 
 def otp_digest(otp: str) -> str:
-    secret = TWILIO_AUTH_TOKEN or GOOGLE_CLIENT_ID or "sgs-local-otp-secret"
+    secret = TWILIO_AUTH_TOKEN or GOOGLE_CLIENT_ID or "sss-local-otp-secret"
     return hmac.new(secret.encode("utf-8"), otp.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
@@ -256,7 +260,7 @@ def store_otp(phone: str, role: str, otp: str) -> None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                UPDATE public.sgs_login_otp_tokens
+                UPDATE public.sss_login_otp_tokens
                 SET is_used = TRUE
                 WHERE role = %s AND phone = %s AND is_used = FALSE
                 """,
@@ -264,7 +268,7 @@ def store_otp(phone: str, role: str, otp: str) -> None:
             )
             cur.execute(
                 """
-                INSERT INTO public.sgs_login_otp_tokens (role, phone, otp_hash, expires_at)
+                INSERT INTO public.sss_login_otp_tokens (role, phone, otp_hash, expires_at)
                 VALUES (%s, %s, %s, %s)
                 """,
                 (role, phone, otp_hash, expires_at),
@@ -273,6 +277,9 @@ def store_otp(phone: str, role: str, otp: str) -> None:
 
 
 def send_otp_sms(phone: str, otp: str) -> None:
+    if OTP_DELIVERY_MODE == "console":
+        return
+
     if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -284,14 +291,15 @@ def send_otp_sms(phone: str, otp: str) -> None:
 
         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
         client.messages.create(
-            body=f"Your SGS Portal OTP is {otp}. It is valid for {OTP_EXPIRY_MINUTES} minutes.",
+            body=f"Your SSS Portal OTP is {otp}. It is valid for {OTP_EXPIRY_MINUTES} minutes.",
             from_=TWILIO_PHONE_NUMBER,
             to=phone,
         )
-    except Exception:
+    except Exception as exc:
+        logger.exception("Twilio failed to send OTP SMS to %s", phone)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="OTP SMS could not be sent. Please try again.",
+            detail=f"OTP SMS could not be sent: {exc}",
         )
 
 
@@ -301,7 +309,7 @@ def verify_stored_otp(phone: str, role: str, otp: str) -> None:
             cur.execute(
                 """
                 SELECT otp_id, otp_hash, attempts, expires_at
-                FROM public.sgs_login_otp_tokens
+                FROM public.sss_login_otp_tokens
                 WHERE role = %s AND phone = %s AND is_used = FALSE
                 ORDER BY created_at DESC
                 LIMIT 1
@@ -315,7 +323,7 @@ def verify_stored_otp(phone: str, role: str, otp: str) -> None:
 
             if otp_row["expires_at"] < datetime.utcnow():
                 cur.execute(
-                    "UPDATE public.sgs_login_otp_tokens SET is_used = TRUE WHERE otp_id = %s",
+                    "UPDATE public.sss_login_otp_tokens SET is_used = TRUE WHERE otp_id = %s",
                     (otp_row["otp_id"],),
                 )
                 conn.commit()
@@ -326,7 +334,7 @@ def verify_stored_otp(phone: str, role: str, otp: str) -> None:
 
             if not hmac.compare_digest(otp_digest(otp), otp_row["otp_hash"]):
                 cur.execute(
-                    "UPDATE public.sgs_login_otp_tokens SET attempts = attempts + 1 WHERE otp_id = %s",
+                    "UPDATE public.sss_login_otp_tokens SET attempts = attempts + 1 WHERE otp_id = %s",
                     (otp_row["otp_id"],),
                 )
                 conn.commit()
@@ -334,7 +342,7 @@ def verify_stored_otp(phone: str, role: str, otp: str) -> None:
 
             cur.execute(
                 """
-                UPDATE public.sgs_login_otp_tokens
+                UPDATE public.sss_login_otp_tokens
                 SET is_used = TRUE, verified_at = CURRENT_TIMESTAMP
                 WHERE otp_id = %s
                 """,
@@ -351,7 +359,7 @@ def assert_recent_phone_otp_verified(phone: str, role: str) -> None:
             cur.execute(
                 """
                 SELECT otp_id
-                FROM public.sgs_login_otp_tokens
+                FROM public.sss_login_otp_tokens
                 WHERE role = %s
                   AND phone = %s
                   AND verified_at IS NOT NULL
@@ -415,12 +423,16 @@ def check_phone(payload: PhoneCheckRequest):
     otp = create_otp()
     store_otp(phone, payload.role, otp)
     send_otp_sms(phone, otp)
-    return {
+    response = {
         "otpSent": True,
         "role": payload.role,
         "phone": phone,
         "expiresInMinutes": OTP_EXPIRY_MINUTES,
     }
+    if OTP_DELIVERY_MODE == "console":
+        response["devOtp"] = otp
+
+    return response
 
 
 @app.post("/api/auth/verify-otp")
@@ -432,7 +444,14 @@ def verify_otp(payload: OtpVerifyRequest):
 
     assert_role_matches(user, payload.role)
     verify_stored_otp(phone, payload.role, payload.otp.strip())
-    return {"otpVerified": True, "role": payload.role, "phone": phone}
+    return {
+        "authenticated": True,
+        "otpVerified": True,
+        "email": user_email(user, payload.role),
+        "phone": phone,
+        "role": payload.role,
+        "user": public_user(user, payload.role),
+    }
 
 
 @app.post("/api/auth/login")

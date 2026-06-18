@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "SGS Portal Login",
-  description: "SGS Portal sign in screen"
+  title: "SSS Portal Login",
+  description: "SSS Portal sign in screen"
 };
 
 export default function RootLayout({ children }) {

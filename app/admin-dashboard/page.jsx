@@ -1,7 +1,7 @@
 import DashboardShell from "../DashboardShell";
 
 export const metadata = {
-  title: "Admin Dashboard | SGS Portal"
+  title: "Admin Dashboard | SSS Portal"
 };
 
 export default function AdminDashboard() {

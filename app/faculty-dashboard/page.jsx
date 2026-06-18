@@ -1,7 +1,7 @@
 import DashboardShell from "../DashboardShell";
 
 export const metadata = {
-  title: "Faculty Dashboard | SGS Portal"
+  title: "Faculty Dashboard | SSS Portal"
 };
 
 export default function FacultyDashboard() {

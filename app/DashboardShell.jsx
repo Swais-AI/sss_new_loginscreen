@@ -14,7 +14,7 @@ export default function DashboardShell({ role }) {
   const [session, setSession] = useState(null);
 
   useEffect(() => {
-    const storedSession = sessionStorage.getItem("sgsUserSession") || localStorage.getItem("sgsUserSession");
+    const storedSession = sessionStorage.getItem("sssUserSession") || localStorage.getItem("sssUserSession");
 
     if (!storedSession) {
       window.location.replace("/");
@@ -24,8 +24,8 @@ export default function DashboardShell({ role }) {
     try {
       setSession(JSON.parse(storedSession));
     } catch {
-      sessionStorage.removeItem("sgsUserSession");
-      localStorage.removeItem("sgsUserSession");
+      sessionStorage.removeItem("sssUserSession");
+      localStorage.removeItem("sssUserSession");
       window.location.replace("/");
     }
   }, []);
@@ -47,8 +47,8 @@ export default function DashboardShell({ role }) {
   }, [session]);
 
   function handleLogout() {
-    sessionStorage.removeItem("sgsUserSession");
-    localStorage.removeItem("sgsUserSession");
+    sessionStorage.removeItem("sssUserSession");
+    localStorage.removeItem("sssUserSession");
     window.location.replace("/");
   }
 
@@ -64,7 +64,7 @@ export default function DashboardShell({ role }) {
     <main className="dashboard-page">
       <section className="dashboard-panel">
         <div>
-          <p className="dashboard-kicker">SGS Portal</p>
+          <p className="dashboard-kicker">SSS Portal</p>
           <h1>{roleLabels[role]}</h1>
           <p className="dashboard-copy">Welcome, {displayName}. Your login was completed successfully.</p>
         </div>
