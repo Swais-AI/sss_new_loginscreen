@@ -240,7 +240,19 @@ export default function Home() {
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      throw new Error(data.detail || "Something went wrong. Please try again.");
+      if (response.status === 404) {
+        throw new Error("Not authorised to login");
+      }
+
+      const detail = typeof data.detail === "string" ? data.detail : "";
+      if (
+        detail.toLowerCase().includes("does not exist") ||
+        detail.toLowerCase().includes("not found")
+      ) {
+        throw new Error("Not authorised to login");
+      }
+
+      throw new Error(detail || "Something went wrong. Please try again.");
     }
 
     return data;

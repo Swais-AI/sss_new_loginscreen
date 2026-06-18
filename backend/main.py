@@ -44,6 +44,7 @@ TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER", "").strip()
 OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "5"))
 OTP_DELIVERY_MODE = os.getenv("OTP_DELIVERY_MODE", "sms").strip().lower()
 OTP_MAX_ATTEMPTS = 5
+AUTH_NOT_AUTHORISED_MESSAGE = "Not authorised to login"
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -406,7 +407,7 @@ def health():
 def check_email(payload: EmailCheckRequest):
     user = fetch_user(payload.email, payload.role)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email does not exist.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=AUTH_NOT_AUTHORISED_MESSAGE)
 
     assert_role_matches(user, payload.role)
     return {"exists": True, "role": payload.role, "email": payload.email}
@@ -417,7 +418,7 @@ def check_phone(payload: PhoneCheckRequest):
     phone = normalize_phone(payload.phone)
     user = fetch_user_by_phone(phone, payload.role)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Phone number does not exist.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=AUTH_NOT_AUTHORISED_MESSAGE)
 
     assert_role_matches(user, payload.role)
     otp = create_otp()
@@ -440,7 +441,7 @@ def verify_otp(payload: OtpVerifyRequest):
     phone = normalize_phone(payload.phone)
     user = fetch_user_by_phone(phone, payload.role)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Phone number does not exist.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=AUTH_NOT_AUTHORISED_MESSAGE)
 
     assert_role_matches(user, payload.role)
     verify_stored_otp(phone, payload.role, payload.otp.strip())
@@ -458,7 +459,7 @@ def verify_otp(payload: OtpVerifyRequest):
 def login(payload: LoginRequest):
     user = fetch_user(payload.email, payload.role)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email does not exist.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=AUTH_NOT_AUTHORISED_MESSAGE)
 
     assert_role_matches(user, payload.role)
 
@@ -487,7 +488,7 @@ def login_phone(payload: PhoneLoginRequest):
 
     user = fetch_user_by_phone(phone, payload.role)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Phone number does not exist.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=AUTH_NOT_AUTHORISED_MESSAGE)
 
     assert_role_matches(user, payload.role)
 
