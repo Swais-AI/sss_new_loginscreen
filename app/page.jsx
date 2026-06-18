@@ -85,7 +85,6 @@ export default function Home() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
-  const [password, setPassword] = useState("");
   const [isEmailVerified, setIsEmailVerified] = useState(false);
   const [phoneStep, setPhoneStep] = useState("phone");
   const [googleToken, setGoogleToken] = useState("");
@@ -131,14 +130,12 @@ export default function Home() {
     pendingGoogleLoginRef.current = null;
     setGoogleToken("");
     setIsGoogleVerified(false);
-    setPassword("");
     setMessage("");
   }, [email, selectedRole, isGoogleVerified]);
 
   useEffect(() => {
     setPhoneStep("phone");
     setOtp("");
-    setPassword("");
     setGoogleToken("");
     setIsGoogleVerified(false);
     pendingGoogleLoginRef.current = null;
@@ -154,7 +151,11 @@ export default function Home() {
       setIsEmailVerified(true);
       setGoogleToken(verifiedLogin.googleToken);
       setIsGoogleVerified(true);
-      setMessage("Google verified. Please enter your password.");
+      completeGoogleLogin({
+        email: verifiedLogin.email,
+        role: verifiedLogin.role,
+        googleToken: verifiedLogin.googleToken
+      });
       setIsLoading(false);
       return;
     }
@@ -192,8 +193,11 @@ export default function Home() {
     setGoogleToken(token);
     setIsGoogleVerified(true);
     pendingGoogleLoginRef.current = null;
-    setMessage("Google verified. Please enter your password.");
-    setIsLoading(false);
+    completeGoogleLogin({
+      email: loginContext.email,
+      role: loginContext.role,
+      googleToken: token
+    });
   }, []);
 
   function dashboardPath(role) {
@@ -225,7 +229,7 @@ export default function Home() {
       return "Send OTP";
     }
 
-    return isEmailVerified && (!googleClientId || isGoogleVerified) ? "Sign In" : "Continue";
+    return "Continue";
   }
 
   async function postJson(path, body) {
@@ -289,6 +293,31 @@ export default function Home() {
     });
 
     window.location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+  }
+
+  async function completeGoogleLogin(loginContext) {
+    setIsLoading(true);
+    setMessage("");
+
+    try {
+      const loginResponse = await postJson("/api/auth/login", {
+        email: loginContext.email,
+        role: loginContext.role,
+        googleToken: loginContext.googleToken
+      });
+
+      if (!loginResponse.authenticated) {
+        setMessage("Authentication could not be completed.");
+        return;
+      }
+
+      sessionStorage.removeItem("sssVerifiedGoogleLogin");
+      completeLogin(loginResponse);
+    } catch (error) {
+      setMessage(error.message || "Something went wrong. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   function completeLogin(data) {
@@ -355,56 +384,24 @@ export default function Home() {
         return;
       }
 
-      if (!isEmailVerified) {
-        await postJson("/api/auth/check-email", {
-          email: email.trim(),
-          role: selectedRole
-        });
-        setIsEmailVerified(true);
-        if (googleClientId) {
-          await startGoogleVerification({
-            email: email.trim(),
-            role: selectedRole
-          });
-          return;
-        }
-
-        setMessage("");
-        return;
-      }
-
-      if (googleClientId && !isGoogleVerified) {
-        await startGoogleVerification({
-          email: email.trim(),
-          role: selectedRole
-        });
-        return;
-      }
-
-      if (!password) {
-        setMessage("Please enter your password.");
-        return;
-      }
-
-    const loginResponse = await postJson("/api/auth/login", {
+      await postJson("/api/auth/check-email", {
         email: email.trim(),
-        role: selectedRole,
-        password,
-        googleToken
+        role: selectedRole
       });
+      setIsEmailVerified(true);
 
-      if (loginResponse.requiresGoogleAuth) {
-        if (!googleClientId) {
-          setMessage("Google Client ID is not configured.");
-          return;
-        }
-
+      if (googleClientId) {
         await startGoogleVerification({
           email: email.trim(),
           role: selectedRole
         });
         return;
       }
+
+      const loginResponse = await postJson("/api/auth/login", {
+        email: email.trim(),
+        role: selectedRole
+      });
 
       if (!loginResponse.authenticated) {
         setMessage("Authentication could not be completed.");
@@ -557,22 +554,6 @@ export default function Home() {
               </label>
             ) : null}
 
-            {method === "email" && isEmailVerified && (!googleClientId || isGoogleVerified) ? (
-              <label className="field-group">
-                <span>Password</span>
-                <span className="input-wrap">
-                  <LockIcon />
-                  <input
-                    type="password"
-                    placeholder="Enter your password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    disabled={isLoading}
-                  />
-                </span>
-              </label>
-            ) : null}
-
             {message ? <p className="form-message" role="alert">{message}</p> : null}
 
             <div className="form-links-row">
@@ -580,9 +561,6 @@ export default function Home() {
                 <input type="checkbox" />
                 <span>Remember me</span>
               </label>
-              <a className="forgot-link" href="#">
-                Forgot Password?
-              </a>
             </div>
 
             <button className="sign-in" type="submit" disabled={isLoading}>
