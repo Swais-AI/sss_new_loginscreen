@@ -98,14 +98,13 @@ ROLE_TABLES = {
         "email": env_column("SSS_TEACHER_EMAIL_COLUMN", "email"),
         "phone": env_column("SSS_TEACHER_PHONE_COLUMN", "phone"),
         "password": env_column("SSS_TEACHER_PASSWORD_COLUMN", "password"),
-        "role": env_column("SSS_TEACHER_ROLE_COLUMN", "role"),
     },
     "Headmaster": {
         "table": "sss_teacher_master",
         "email": env_column("SSS_TEACHER_EMAIL_COLUMN", "email"),
         "phone": env_column("SSS_TEACHER_PHONE_COLUMN", "phone"),
         "password": env_column("SSS_TEACHER_PASSWORD_COLUMN", "password"),
-        "role": env_column("SSS_TEACHER_ROLE_COLUMN", "role"),
+        "role": env_column("SSS_TEACHER_ROLE_COLUMN", "employee_role"),
         "required_role": "Headmaster",
     },
     "Parent": {
@@ -144,14 +143,22 @@ def get_role_config(role: str) -> dict[str, str]:
 
 def fetch_user(email: str, role: str) -> dict[str, Any] | None:
     config = get_role_config(role)
+    params = [email]
+
     query = (
         f'SELECT * FROM "{config["table"]}" '
-        f'WHERE LOWER("{config["email"]}") = LOWER(%s) LIMIT 1'
+        f'WHERE LOWER("{config["email"]}") = LOWER(%s)'
     )
+
+    if config.get("required_role"):
+        query += f' AND LOWER("{config["role"]}") = LOWER(%s)'
+        params.append(config["required_role"])
+
+    query += " LIMIT 1"
 
     with db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(query, (email,))
+            cur.execute(query, params)
             return cur.fetchone()
 
 
@@ -192,17 +199,24 @@ def fetch_user_by_phone(phone: str, role: str) -> dict[str, Any] | None:
     config = get_role_config(role)
     values = phone_lookup_values(phone)
     placeholders = ", ".join(["%s"] * len(values))
+    params = list(values)
+
     query = (
         f'SELECT * FROM "{config["table"]}" '
         f'WHERE REGEXP_REPLACE(COALESCE("{config["phone"]}"::text, \'\'), \'[^0-9+]\', \'\', \'g\') '
-        f"IN ({placeholders}) LIMIT 1"
+        f"IN ({placeholders})"
     )
+
+    if config.get("required_role"):
+        query += f' AND LOWER("{config["role"]}") = LOWER(%s)'
+        params.append(config["required_role"])
+
+    query += " LIMIT 1"
 
     with db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(query, values)
+            cur.execute(query, params)
             return cur.fetchone()
-
 
 def assert_role_matches(user: dict[str, Any], role: str) -> None:
     config = get_role_config(role)

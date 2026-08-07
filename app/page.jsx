@@ -2,6 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 
+// ============================================
+// ICONS
+// ============================================
+
 function MailIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -78,6 +82,10 @@ function decodeGoogleState(state) {
   }
 }
 
+// ============================================
+// MAIN COMPONENT
+// ============================================
+
 export default function Home() {
   const [method, setMethod] = useState("email");
   const [selectedRole, setSelectedRole] = useState("Select your role");
@@ -94,7 +102,9 @@ export default function Home() {
   const roleDropdownRef = useRef(null);
   const pendingGoogleLoginRef = useRef(null);
   const isRestoringGoogleLoginRef = useRef(false);
-  const roles = ["Student", "Faculty", "Headmaster", "Parent", "Admin"];
+  
+  const roles = ["School Admin", "Headmaster", "Faculty", "Student", "Parent"];
+  
   const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/$/, "");
   const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
   const googleRedirectUri = process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI || "";
@@ -202,18 +212,14 @@ export default function Home() {
 
   function dashboardPath(role) {
     const paths = {
-      Student: "/student-dashboard",
-      Faculty: "/faculty-dashboard",
-      Headmaster: "/headmaster-dashboard",
-      Parent: "/parent-dashboard",
-      Admin: "/admin-dashboard"
+      "School Admin": "/admin-dashboard",
+      "Headmaster": "/headmaster-dashboard",
+      "Faculty": "/faculty-dashboard",
+      "Student": "/student-dashboard",
+      "Parent": "/parent-dashboard"
     };
 
     return paths[role] || "/";
-  }
-
-  function selectedRoleIsValid() {
-    return roles.includes(selectedRole);
   }
 
   function submitButtonText() {
@@ -333,64 +339,46 @@ export default function Home() {
     window.location.assign(dashboardPath(data.role));
   }
 
+  // ============================================
+  // ✅ FIXED: handleSubmit - SIMPLIFIED
+  // ============================================
+
   async function handleSubmit(event) {
     event.preventDefault();
     setMessage("");
 
-    if (!selectedRoleIsValid()) {
+    console.log('🔍 === DEBUG ===');
+    console.log('📧 Email:', email);
+    console.log('👤 Selected Role:', selectedRole);
+    console.log('🔍 === END DEBUG ===');
+
+    // ✅ Check if role is selected
+    if (selectedRole === "Select your role" || !selectedRole) {
       setMessage("Please select your role.");
+      return;
+    }
+
+    // ✅ Check if email is provided
+    if (!email.trim()) {
+      setMessage("Please enter your email address.");
       return;
     }
 
     setIsLoading(true);
 
     try {
-      if (method === "phone") {
-        const normalizedPhone = phone.trim();
-
-        if (!normalizedPhone) {
-          setMessage("Please enter your phone number.");
-          return;
-        }
-
-        if (phoneStep === "phone") {
-          const response = await postJson("/api/auth/check-phone", {
-            phone: normalizedPhone,
-            role: selectedRole
-          });
-          setPhoneStep("otp");
-          setMessage(`OTP sent. It is valid for ${response.expiresInMinutes} minutes.`);
-          return;
-        }
-
-        if (phoneStep === "otp") {
-          if (!otp.trim()) {
-            setMessage("Please enter the OTP.");
-            return;
-          }
-
-          const loginResponse = await postJson("/api/auth/verify-otp", {
-            phone: normalizedPhone,
-            role: selectedRole,
-            otp: otp.trim()
-          });
-          completeLogin(loginResponse);
-          return;
-        }
-      }
-
-      if (!email.trim()) {
-        setMessage("Please enter your email address.");
-        return;
-      }
-
+      // ✅ Call check-email API
+      console.log('📧 Calling check-email API...');
       await postJson("/api/auth/check-email", {
         email: email.trim(),
         role: selectedRole
       });
-      setIsEmailVerified(true);
 
+      console.log('✅ Email check passed!');
+
+      // ✅ If Google Client ID is configured, start Google verification
       if (googleClientId) {
+        console.log('🔑 Starting Google verification...');
         await startGoogleVerification({
           email: email.trim(),
           role: selectedRole
@@ -398,6 +386,8 @@ export default function Home() {
         return;
       }
 
+      // ✅ Fallback: Direct login (for testing without Google OAuth)
+      console.log('🔑 Calling login API...');
       const loginResponse = await postJson("/api/auth/login", {
         email: email.trim(),
         role: selectedRole
@@ -408,9 +398,10 @@ export default function Home() {
         return;
       }
 
-      sessionStorage.removeItem("sssVerifiedGoogleLogin");
+      console.log('✅ Login successful!');
       completeLogin(loginResponse);
     } catch (error) {
+      console.error('❌ Login error:', error);
       setMessage(error.message || "Something went wrong. Please try again.");
     } finally {
       setIsLoading(false);
