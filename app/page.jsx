@@ -336,7 +336,15 @@ export default function Home() {
 
     sessionStorage.setItem("sssUserSession", JSON.stringify(session));
     localStorage.setItem("sssUserSession", JSON.stringify(session));
-    window.location.assign(dashboardPath(data.role));
+
+    // Faculty only: the backend returns a JWT (minted by the faculty backend's
+    // SSO endpoint). Hand it to the faculty dashboard via ?token= so it can
+    // verify the user. Other roles have no access_token and redirect as before.
+    const target = dashboardPath(data.role);
+    const url = (data.role === "Faculty" && data.access_token)
+      ? `${target}${target.includes("?") ? "&" : "?"}token=${encodeURIComponent(data.access_token)}`
+      : target;
+    window.location.assign(url);
   }
 
   // ============================================

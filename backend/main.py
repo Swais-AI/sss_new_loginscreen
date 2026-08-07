@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import psycopg
+import requests
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg.rows import dict_row
@@ -45,6 +46,13 @@ OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "5"))
 OTP_DELIVERY_MODE = os.getenv("OTP_DELIVERY_MODE", "sms").strip().lower()
 OTP_MAX_ATTEMPTS = 5
 AUTH_NOT_AUTHORISED_MESSAGE = "Not authorised to login"
+
+# Faculty dashboard SSO. After we verify the user (Google or OTP), we ask the
+# faculty backend to mint its own JWT — it owns its signing key, so we never
+# share SECRET_KEY. SSO_SECRET must match the faculty backend's SSO_SECRET;
+# FACULTY_SSO_URL points at its /api/v1/auth/sso-token endpoint.
+FACULTY_SSO_URL = os.getenv("FACULTY_SSO_URL", "").strip()
+SSO_SECRET = os.getenv("SSO_SECRET", "").strip()
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -256,6 +264,38 @@ def user_email(user: dict[str, Any], role: str) -> str:
     return str(user.get(config["email"], "") or "")
 
 
+def fetch_faculty_sso_token(email: str) -> str | None:
+    """Ask the faculty backend to mint a JWT for this already-verified email.
+    Returns the token, or None if SSO is unconfigured or the call fails — in
+    which case login still succeeds and the user is redirected without a token
+    (the dashboard will then send them back to log in), matching SGS behaviour."""
+    if not FACULTY_SSO_URL or not SSO_SECRET or not email:
+        return None
+    try:
+        resp = requests.post(
+            FACULTY_SSO_URL,
+            json={"email": email},
+            headers={"X-SSO-Secret": SSO_SECRET},
+            timeout=8,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("access_token")
+        logger.warning("Faculty SSO token request failed: %s %s", resp.status_code, resp.text[:200])
+    except requests.RequestException as exc:
+        logger.warning("Faculty SSO token request error: %s", exc)
+    return None
+
+
+def maybe_attach_faculty_token(response: dict[str, Any], user: dict[str, Any], role: str) -> dict[str, Any]:
+    """Only Faculty logins carry a token — that's the one dashboard that verifies it."""
+    if ROLE_ALIASES.get(role, role) == "Faculty":
+        token = fetch_faculty_sso_token(user_email(user, role))
+        if token:
+            response["access_token"] = token
+            response["token_type"] = "bearer"
+    return response
+
+
 def create_otp() -> str:
     return f"{random.SystemRandom().randint(100000, 999999)}"
 
@@ -435,14 +475,14 @@ def verify_otp(payload: OtpVerifyRequest):
 
     assert_role_matches(user, payload.role)
     verify_stored_otp(phone, payload.role, payload.otp.strip())
-    return {
+    return maybe_attach_faculty_token({
         "authenticated": True,
         "otpVerified": True,
         "email": user_email(user, payload.role),
         "phone": phone,
         "role": payload.role,
         "user": public_user(user, payload.role),
-    }
+    }, user, payload.role)
 
 
 @app.post("/api/auth/login")
@@ -459,10 +499,10 @@ def login(payload: LoginRequest):
     if payload.googleToken:
         verify_google_token(payload.googleToken, payload.email)
 
-    return {
+    return maybe_attach_faculty_token({
         "authenticated": True,
         "email": payload.email,
         "role": payload.role,
         "user": public_user(user, payload.role),
-    }
+    }, user, payload.role)
 
