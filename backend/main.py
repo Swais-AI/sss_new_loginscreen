@@ -134,8 +134,11 @@ def db_connection():
         yield conn
 
 
+ROLE_ALIASES = {"School Admin": "Admin"}
+
+
 def get_role_config(role: str) -> dict[str, str]:
-    config = ROLE_TABLES.get(role)
+    config = ROLE_TABLES.get(ROLE_ALIASES.get(role, role))
     if not config:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role selected.")
     return config

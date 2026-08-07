@@ -212,11 +212,11 @@ export default function Home() {
 
   function dashboardPath(role) {
     const paths = {
-      "School Admin": "/admin-dashboard",
-      "Headmaster": "/headmaster-dashboard",
-      "Faculty": "/faculty-dashboard",
-      "Student": "/student-dashboard",
-      "Parent": "/parent-dashboard"
+      "School Admin": "http://18.61.240.248:3001",
+      "Headmaster": "http://18.61.240.248:3000",
+      "Faculty": "http://18.61.240.248:3002",
+      "Student": "http://18.61.240.248:1084",
+      "Parent": "http://18.61.240.248:3009"
     };
 
     return paths[role] || "/";
@@ -356,6 +356,47 @@ export default function Home() {
     if (selectedRole === "Select your role" || !selectedRole) {
       setMessage("Please select your role.");
       return;
+    }
+
+    // Phone + OTP sign-in path (restored — dropped in commit 903fdd6)
+    if (method === "phone") {
+      const normalizedPhone = phone.trim();
+
+      if (!normalizedPhone) {
+        setMessage("Please enter your phone number.");
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        if (phoneStep === "phone") {
+          const response = await postJson("/api/auth/check-phone", {
+            phone: normalizedPhone,
+            role: selectedRole
+          });
+          setPhoneStep("otp");
+          setMessage(`OTP sent. It is valid for ${response.expiresInMinutes} minutes.`);
+          return;
+        }
+
+        if (!otp.trim()) {
+          setMessage("Please enter the OTP.");
+          return;
+        }
+
+        const loginResponse = await postJson("/api/auth/verify-otp", {
+          phone: normalizedPhone,
+          role: selectedRole,
+          otp: otp.trim()
+        });
+        completeLogin(loginResponse);
+        return;
+      } catch (error) {
+        setMessage(error.message || "Something went wrong. Please try again.");
+        return;
+      } finally {
+        setIsLoading(false);
+      }
     }
 
     // ✅ Check if email is provided
