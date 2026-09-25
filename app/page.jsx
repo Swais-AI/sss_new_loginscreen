@@ -212,11 +212,11 @@ export default function Home() {
 
   function dashboardPath(role) {
     const paths = {
-      "School Admin": "http://18.61.240.248:3001",
-      "Headmaster": "http://18.61.240.248:3000",
-      "Faculty": "http://18.61.240.248:3002",
-      "Student": "http://18.61.240.248:1084",
-      "Parent": "http://18.61.240.248:3009"
+      "School Admin": "https://staging.sss.swais.in/admin",
+      "Headmaster": "https://staging.sss.swais.in/headmaster",
+      "Faculty": "https://staging.sss.swais.in/faculty",
+      "Student": "https://staging.sss.swais.in/student",
+      "Parent": "https://staging.sss.swais.in/parent/dashboard"
     };
 
     return paths[role] || "/";
@@ -340,6 +340,11 @@ export default function Home() {
     // Faculty only: the backend returns a JWT (minted by the faculty backend's
     // SSO endpoint). Hand it to the faculty dashboard via ?token= so it can
     // verify the user. Other roles have no access_token and redirect as before.
+
+    if (data.role === "Faculty" && data.access_token) {
+       localStorage.setItem("swais_faculty_token", data.access_token);
+    }
+
     const target = dashboardPath(data.role);
     const url = (data.role === "Faculty" && data.access_token)
       ? `${target}${target.includes("?") ? "&" : "?"}token=${encodeURIComponent(data.access_token)}`
