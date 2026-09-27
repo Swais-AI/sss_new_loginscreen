@@ -6,12 +6,12 @@ import { sendOtpSms } from '../../../../lib/nimbus-sms';
 
 if (!global.pgPool) {
   global.pgPool = new Pool({
-    host: process.env.PGHOST,
-    user: process.env.PGUSER,
-    password: process.env.PGPASSWORD,
-    database: process.env.PGDATABASE || 'sss_prod',
-    port: parseInt(process.env.PGPORT || '5432'),
-    ssl: process.env.PGHOST === 'localhost' ? false : { rejectUnauthorized: false },
+    host: process.env.PGHOST || process.env.DB_HOST,
+    user: process.env.PGUSER || process.env.DB_USER,
+    password: process.env.PGPASSWORD || process.env.DB_PASSWORD,
+    database: process.env.PGDATABASE || process.env.DB_NAME || 'sss_prod',
+    port: parseInt(process.env.PGPORT || process.env.DB_PORT || '5432'),
+    ssl: { rejectUnauthorized: false }, // FIX: AWS RDS strictly requires encrypted connections
     max: 5,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
@@ -19,7 +19,6 @@ if (!global.pgPool) {
 }
 const pool = global.pgPool;
 
-// FIX: Updated phone columns based on your actual PostgreSQL schema
 const ROLE_MAPPING = {
   "School Admin": { table: "sss_student_master", phoneColumn: "admin_phone" }, 
   "Headmaster": { table: "sss_teacher_master", phoneColumn: "phone" }, 

@@ -3,17 +3,20 @@
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
 
-const pool = new Pool({
-  host: process.env.PGHOST,
-  user: process.env.PGUSER,
-  password: process.env.PGPASSWORD,
-  database: process.env.PGDATABASE || 'sss_prod',
-  port: parseInt(process.env.PGPORT || '5432'),
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  max: 5,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
-});
+if (!global.pgPool) {
+  global.pgPool = new Pool({
+    host: process.env.PGHOST || process.env.DB_HOST,
+    user: process.env.PGUSER || process.env.DB_USER,
+    password: process.env.PGPASSWORD || process.env.DB_PASSWORD,
+    database: process.env.PGDATABASE || process.env.DB_NAME || 'sss_prod',
+    port: parseInt(process.env.PGPORT || process.env.DB_PORT || '5432'),
+    ssl: { rejectUnauthorized: false }, // FIX: AWS RDS strictly requires encrypted connections
+    max: 5,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+}
+const pool = global.pgPool;
 
 const ROLE_MAPPING = {
   "School Admin": { table: "sss_users_master", emailColumn: "email", nameColumn: "username" },
@@ -24,11 +27,11 @@ const ROLE_MAPPING = {
 };
 
 const DASHBOARD_PATHS = {
-  "School Admin": "/admin-dashboard",
-  "Headmaster": "/headmaster-dashboard",
-  "Faculty": "/faculty-dashboard",
-  "Student": "/student-dashboard",
-  "Parent": "/parent-dashboard",
+  "School Admin": "https://staging.sss.swais.in/admin",
+  "Headmaster": "https://staging.sss.swais.in/headmaster",
+  "Faculty": "https://staging.sss.swais.in/faculty",
+  "Student": "https://staging.sss.swais.in/student",
+  "Parent": "https://staging.sss.swais.in/parent/dashboard",
 };
 
 export async function POST(request) {
