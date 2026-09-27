@@ -3,17 +3,21 @@
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
 
-const pool = new Pool({
-  host: process.env.PGHOST,
-  user: process.env.PGUSER,
-  password: process.env.PGPASSWORD,
-  database: process.env.PGDATABASE || 'sss_prod',
-  port: parseInt(process.env.PGPORT || '5432'),
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  max: 5,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
-});
+// Caching the pool globally prevents connection exhaustion during Next.js hot reloads
+if (!global.pgPool) {
+  global.pgPool = new Pool({
+    host: process.env.PGHOST,
+    user: process.env.PGUSER,
+    password: process.env.PGPASSWORD,
+    database: process.env.PGDATABASE || 'sss_prod',
+    port: parseInt(process.env.PGPORT || '5432'),
+    ssl: process.env.PGHOST === 'localhost' ? false : { rejectUnauthorized: false },
+    max: 5,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+}
+const pool = global.pgPool;
 
 const ROLE_MAPPING = {
   "School Admin": { table: "sss_users_master", emailColumn: "email", nameColumn: "username" },

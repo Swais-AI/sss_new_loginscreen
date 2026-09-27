@@ -6,6 +6,7 @@ import random
 import re
 import math
 import asyncio
+import urllib.parse
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -38,20 +39,12 @@ GOOGLE_CLIENT_ID = os.getenv(
     ""
 ).strip()
 
-TWILIO_ACCOUNT_SID = os.getenv(
-    "TWILIO_ACCOUNT_SID",
-    ""
-).strip()
-
-TWILIO_AUTH_TOKEN = os.getenv(
-    "TWILIO_AUTH_TOKEN",
-    ""
-).strip()
-
-TWILIO_PHONE_NUMBER = os.getenv(
-    "TWILIO_PHONE_NUMBER",
-    ""
-).strip()
+# NIMBUS SMS CREDENTIALS
+NIMBUS_USER_ID = os.getenv("NIMBUS_USER_ID", "").strip()
+NIMBUS_PASSWORD = os.getenv("NIMBUS_PASSWORD", "").strip()
+NIMBUS_SENDER_ID = os.getenv("NIMBUS_SENDER_ID", "").strip()
+NIMBUS_ENTITY_ID = os.getenv("NIMBUS_ENTITY_ID", "").strip()
+NIMBUS_TEMPLATE_ID = os.getenv("NIMBUS_TEMPLATE_ID", "").strip()
 
 OTP_EXPIRY_MINUTES = int(
     os.getenv("OTP_EXPIRY_MINUTES", "5")
@@ -161,11 +154,11 @@ app = FastAPI(
 
 
 app.add_middleware(
-            CORSMiddleware,
+    CORSMiddleware,
     allow_origins=[
         FRONTEND_ORIGIN,
         "http://127.0.0.1:3000",
-            ],
+    ],
     allow_credentials=True,
     allow_methods=[
         "POST",
@@ -458,7 +451,6 @@ def phone_lookup_values(
         dict.fromkeys(values)
     )
 
-
 # ============================================================
 # PHONE USER LOOKUP
 # ============================================================
@@ -688,9 +680,8 @@ def create_otp() -> str:
 
 
 def otp_digest(otp: str) -> str:
-
     secret = (
-        TWILIO_AUTH_TOKEN
+        NIMBUS_PASSWORD
         or GOOGLE_CLIENT_ID
         or "sss-local-otp-secret"
     )
@@ -762,7 +753,7 @@ def store_otp(
 
 
 # ============================================================
-# SEND OTP SMS
+# SEND OTP SMS (NIMBUS INTEGRATION)
 # ============================================================
 
 def send_otp_sms(
@@ -771,45 +762,46 @@ def send_otp_sms(
 ) -> None:
 
     if OTP_DELIVERY_MODE == "console":
+        print(f"OTP for {phone}: {otp}")
         return
 
     if (
-        not TWILIO_ACCOUNT_SID
-        or not TWILIO_AUTH_TOKEN
-        or not TWILIO_PHONE_NUMBER
+        not NIMBUS_USER_ID 
+        or not NIMBUS_PASSWORD
     ):
-
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Twilio SMS is not configured.",
+            detail="Nimbus SMS is not configured.",
         )
 
     try:
+        clean_phone = phone.replace("+", "")
+        # CRITICAL FIX: Ensure exactly one space before the period to match approved DLT template
+        message = f"Your mobile verification OTP is {otp} for SSS School . It is valid for {OTP_EXPIRY_MINUTES} minutes. Do not share this OTP with anyone.\n- SARAF WORLDSPHERE AI SERVICES"
+        
+        # CRITICAL FIX: urllib.parse.quote ensures spaces become "%20" instead of "+"
+        encoded_message = urllib.parse.quote(message, safe="")
+        encoded_password = urllib.parse.quote(NIMBUS_PASSWORD, safe="")
 
-        from twilio.rest import Client
+        # Manually construct the URL to bypass requests' default url encoding 
+        url = f"http://nimbusit.biz/api/SmsApi/SendSingleApi?UserID={NIMBUS_USER_ID}&Password={encoded_password}&SenderID={NIMBUS_SENDER_ID}&Phno={clean_phone}&Msg={encoded_message}&EntityID={NIMBUS_ENTITY_ID}&TemplateID={NIMBUS_TEMPLATE_ID}"
 
-        client = Client(
-            TWILIO_ACCOUNT_SID,
-            TWILIO_AUTH_TOKEN
-        )
+        resp = requests.get(url, timeout=10, headers={"Cache-Control": "no-cache"})
+        data = resp.text
+        
+        logger.info(f"📡 Nimbus API Response: {data}")
+        
+        # Catch silent errors hidden in the response body
+        if "err" in data.lower():
+            logger.warning("Nimbus SMS API returned an error: %s", data)
+            raise Exception(f"Provider rejected request: {data}")
 
-        client.messages.create(
-            body=(
-                f"Your SSS Portal OTP is {otp}. "
-                f"It is valid for "
-                f"{OTP_EXPIRY_MINUTES} minutes."
-            ),
-            from_=TWILIO_PHONE_NUMBER,
-            to=phone,
-        )
-
+        if resp.status_code != 200:
+            logger.warning("Nimbus SMS API returned status %s: %s", resp.status_code, data)
+            raise Exception(f"API returned status {resp.status_code}")
+            
     except Exception as exc:
-
-        logger.exception(
-            "Twilio failed to send OTP SMS to %s",
-            phone
-        )
-
+        logger.exception("Nimbus failed to send OTP SMS to %s", phone)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"OTP SMS could not be sent: {exc}",
